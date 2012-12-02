@@ -1,0 +1,215 @@
+<?php
+/**
+ * @file
+ * Statistics provide user statistics.
+ *
+ * @author Janos KUSZING <kuszing.janos@netstudio.hu>
+ *
+ * Based on:
+ * @link http://drupal.org/project/user_stats/ User Stats Module @endlink
+ *
+ * @todo Set the rights of modules.
+ */
+
+/**
+ * Implements hook_permission().
+ */
+function user_statistics_permission() {
+  return array(
+    // Global statistics page.
+    'access site statistics' => array(
+      'title' => t('Access Site Statistics'),
+      'description' => t('Get the Site statistics.'),
+    ),
+    // User's statistics page.
+    'access users statistics' => array(
+      'title' => t('Access Users Statistics'),
+      'description' => t('Get the User statistics.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function user_statistics_menu() {
+  // Global statistics form.
+  $items['site-statistics'] = array(
+    'title'             => 'Site Statistics',
+    'description'       => 'The site statistics page.',
+    'page callback'     => 'drupal_get_form',
+    'page arguments'    => array('user_statistics_site_statistics_form'),
+    'access arguments'  => array('access site statistics'),
+    'type'              => MENU_NORMAL_ITEM,
+  );
+  // User's statistics page.
+  $items['user/%user/statistics'] = array(
+    'title'             => 'User Statistics',
+    'description'       => 'User statistics page.',
+    'page callback'     => 'user_statistics_page',
+    'page arguments'    => array(1),
+    'access arguments'  => array('access users statistics'),
+    'type'              => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Display global statistics with 'Refresh' button to clear the cache.
+ */
+function user_statistics_site_statistics_form($form, &$form_state) {
+  $items = array(
+    'title' => 'Results',
+    'items' => array(
+      t('Total Users: %data', array('%data' => user_statistics_get_statistics('total_users'))),
+      t('Online Users: %data', array('%data' => user_statistics_get_statistics('online_users'))),
+      t('Administrators: %data', array('%data' => user_statistics_get_statistics('roles_by_rid', array('rid' => 3)))),
+      t('Females: %data', array(
+        '%data' => user_statistics_get_statistics('fields_by_value',
+          array(
+            'field_name'  => 'field_nem',
+            'field_value' => 'nő',
+          )
+        ),
+      )),
+      t('Males: %data', array(
+        '%data' => user_statistics_get_statistics('fields_by_value',
+          array(
+            'field_name'  => 'field_nem',
+            'field_value' => 'férfi',
+          )
+        ),
+      )),
+    ),
+  );
+
+  // Display form.
+  $form = array();
+  $form['statistics'] = array(
+    '#title'  => 'Statistics',
+    '#markup' => theme('item_list', $items),
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Refresh'),
+  );
+  return $form;
+}
+
+/**
+ * Submit of user_statistics_site_statistics_form().
+ *
+ * @see user_statistics_site_statistics_form()
+ */
+function user_statistics_site_statistics_form_submit($form, &$form_state) {
+  // Clear the cache.
+  user_statistics_clear_cache();
+}
+
+/**
+ * Get a statistical value.
+ *
+ * @param string $type
+ *   - "role_count":            Members count of a Role.
+ *     You have to specify the (integer) RID.
+ *     Example usage:
+ *       @code
+ *         user_statistics_get_statistics('role_count', array('rid' => 4));
+ *       @endcode
+ *
+ *   - "online_members_count":  Currently online members.
+ *   - "females_count":         Number of females.
+ *   - "males_count":           Number of males.
+ *   - "vip_count":             Number of VIPs.
+ *   - "role_count":            Number of a Drupal Role.
+ *
+ * @param array $variables
+ *   An associative array containing:
+ *   - type: role_count
+ *     - rid: Role ID
+ *
+ * @return int
+ *   The result of query.
+ *
+ * @todo
+ * @todo Define filed value query.
+ */
+function user_statistics_get_statistics($type, $variables = array()) {
+  // Cache ID.
+  $cid = 'user_statistics_' . $type . serialize($variables);
+
+  // Read data from cache.
+  if (in_array($type, array('users_count')) && $cache = cache_get($cid)) {
+    $result = $cache->data;
+  }
+  else {
+    switch ($type) {
+      // Total users count.
+      case 'total_users':
+        $result = db_select('users')->countQuery()->execute()->fetchField();
+        break;
+
+      // Online users count, like: user_block_view().
+      case 'online_users':
+        $interval = REQUEST_TIME - variable_get('user_block_seconds_online', 900);
+        $result = db_query("SELECT COUNT(DISTINCT s.uid) FROM {sessions} s WHERE s.timestamp >= :timestamp AND s.uid > 0", array(':timestamp' => $interval))->fetchField();
+        break;
+
+      // Roles count.
+      case 'roles_by_rid':
+        $rid = $variables['rid'];
+        // Variables check.
+        if (!is_integer($rid)) {
+          $message = t('Please set $variables[rid] as integer.');
+          trigger_error($message, E_USER_WARNING);
+          return;
+        }
+        // Get roles count by rid.
+        $result = db_select('users_roles')->condition('rid', $rid, '=')->countQuery()->execute()->fetchField();
+        break;
+
+      // Field values count.
+      case 'fields_by_value':
+        // Variables check.
+        if (empty($variables['field_name']) || empty($variables['field_value'])) {
+          $message = t('Please set the mission $variables[field_name] or $variables[field_value] values.');
+          trigger_error($message, E_USER_WARNING);
+          return;
+        }
+
+        $field_name   = $variables['field_name'];
+        $field_value  = $variables['field_value'];
+        $table_name   = 'field_data_' . $field_name;
+        $table_column = $field_name . '_value';
+
+        // Get the count of rows filtered by a field value.
+        $result = db_select($table_name)
+          ->fields($table_name)
+          ->condition($table_column, $field_value, '=')
+          ->countQuery()
+          ->execute()
+          ->fetchField();
+        break;
+
+      // Invalid parameter.
+      default:
+        trigger_error(
+          t('Please set the correct query type. @type is not a suitable one.',
+            array('@type' => $type)
+          ), E_USER_WARNING);
+        return;
+    }
+    // Set the cache.
+    cache_set($cid, $result);
+  }
+
+  return $result;
+}
+
+/**
+ * Clear the cache of users statistics.
+ */
+function user_statistics_clear_cache() {
+  // Cache entries whose cid began with "user_statistics".
+  cache_clear_all('user_statistics', 'cache', TRUE);
+}

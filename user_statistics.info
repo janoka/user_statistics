@@ -1,0 +1,7 @@
+name = Users Statistics
+description = Users' Statistics.
+dependencies[] = user
+package = Netstudio
+core = 7.x
+files[] = user_statistics.module
+
