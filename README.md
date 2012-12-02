@@ -1,5 +1,7 @@
 # API használata és paraméterezése
 
+A statisztika kihasználja a `cache_get` és `cache_set` Drupal függvényeket, hogy az oldal betöltését gyorsabbá tegye.
+
 ## Függvényhívás:
 
 ```php
