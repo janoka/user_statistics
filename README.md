@@ -61,7 +61,7 @@ Változó paraméter:
 
 ## Példa form a használatra
 
-![Example](./images/user_statistics_example.png)
+![Example](https://raw.github.com/janoka/user_statistics/master/images/user_statistics_example.png)
 
 ```php
 /**
